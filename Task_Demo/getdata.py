@@ -20,4 +20,3 @@ urls = {
         "councillor":'https://xloop-dummy.herokuapp.com/councillor' ,
         "rating":   'https://xloop-dummy.herokuapp.com/rating'
     }
-

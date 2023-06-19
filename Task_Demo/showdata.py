@@ -2,7 +2,9 @@ import requests
 import json
 from getdata import get_api_data, urls
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import avg
+from pyspark.sql.functions import avg, collect_list,struct
+
+
 # Create a SparkSession
 spark = SparkSession.builder \
     .appName("Read JSON File") \
@@ -23,43 +25,25 @@ def spark_data():
     
     return rating,appointment,councillor,patient_councillor
 
-rating, appointment, councillor,patient_councillor = spark_data()
 
 
-# Show the DataFrame
-# rating.show(2)
-# appointment.show(2)
-# councillor.show(2)
-# patient_councillor.show(2)
-appointment_rating_df = rating.join(appointment, rating["appointment_id"] == appointment["id"], "inner").select(appointment['patient_id'],rating['value'],rating['note'])
+def joined_data():
+    
+    rating, appointment, councillor,patient_councillor = spark_data()
+    
+    appointment_rating_df = rating.join(appointment, rating["appointment_id"] == appointment["id"], "inner").select(appointment['patient_id'],rating['value'])
 
+    specialization_df = appointment_rating_df.join(patient_councillor, appointment_rating_df["patient_id"] == patient_councillor["patient_id"], "inner").select(appointment_rating_df['patient_id'],patient_councillor['councillor_id'], appointment_rating_df['value'])
 
-specialization_df = appointment_rating_df.join(patient_councillor, appointment_rating_df["patient_id"] == patient_councillor["patient_id"], "inner")
+    final_df = specialization_df.join(councillor, specialization_df["councillor_id"] == councillor["id"], "inner").select(councillor['id'],councillor['specialization'],specialization_df['value'])
 
-final_df = specialization_df.join(councillor, specialization_df["councillor_id"] == specialization_df["id"], "inner")
+    grouped_df = final_df.groupBy(final_df["id"],final_df["specialization"]).agg(avg(rating["value"]).alias("Avg-Rating-Value")).orderBy("Avg-Rating-Value", ascending = False)
+    
+    # final_group = grouped_df.groupBy(grouped_df["specialization"]).agg(collect_list(struct("id","Avg-Rating-value")).alias("Councillor_id_And_Rating"))
 
-grouped_df = final_df.groupBy(councillor["id"],councillor["specialization"]).agg(avg(rating["value"]).alias("Avg Rating Value"))
-
-# Avg_rating_list = grouped_df.collect()
-
-# output_df = grouped_df.groupBy(grouped_df["specialization"])
-
-# specialization = grouped_df.select('specialization').distinct().rdd.flatMap(lambda x: x).collect()
-
-
-# print(specialization)
-#Avg rating pe group by lagega specialization ki basis pe
-
-
-# Show the result
-#grouped_df.show(15)
-# print(output_df)
-
-sorted_df = grouped_df.orderBy("Avg_Rating_Value", ascending=False)
-
-# Collect the specializations
-specializations = sorted_df.select("specialization").rdd.flatMap(lambda x: x).collect()
-
-# Print the specializations
-for specialization in specializations:
-    print(specialization)
+    # Create tables based on specialization
+    specializations = [row.specialization for row in grouped_df.select("specialization").distinct().collect()]
+    specializations_dict = {}
+    for specialization in specializations:
+        specializations_dict[specialization] = grouped_df.filter(grouped_df["specialization"] == specialization).drop("specialization").toJSON().collect()
+    return specializations_dict
